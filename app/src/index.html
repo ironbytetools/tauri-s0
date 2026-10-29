@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@page { size: letter; margin: 0.5in; }
+body { font-family: Segoe UI, sans-serif; }
+.pg { border: 2px solid #000; padding: 1rem; height: 8in; page-break-after: always; }
+.pg:last-child { page-break-after: auto; }
+@media print { .noprint { display: none; } .pg { border-color: #c00; } }
+</style></head><body>
+<div class="noprint">
+<button id="p" style="font-size:1.2rem;padding:.8rem">window.print()</button>
+<button id="n" style="font-size:1.2rem;padding:.8rem">Native print</button>
+<button id="t" style="font-size:1.2rem;padding:.8rem">Self-test</button>
+<pre id="r"></pre>
+</div>
+<div class="pg"><h1>Page 1</h1><p>Border should print red, buttons should not print.</p></div>
+<div class="pg"><h1>Page 2</h1><p>Should start on a new page; no blank third page.</p></div>
+<script>
+const inv=(c,a)=>window.__TAURI__.core.invoke(c,a);
+const out=m=>{document.getElementById("r").textContent+=m+"\n"};
+document.getElementById("p").onclick=()=>{inv("report",{text:"click window.print"});window.print();};
+document.getElementById("n").onclick=async()=>{try{await inv("native_print");out("native_print invoked ok");inv("report",{text:"native_print ok"})}catch(e){out("error "+e);inv("report",{text:"native_print error "+e})}};
+document.getElementById("t").onclick=async()=>{
+  const r=[];
+  for(const u of ["http://tacfile.localhost/x","tacfile://localhost/x"]){
+    try{const x=await fetch(u);r.push(u+" -> "+x.status)}catch(e){r.push(u+" -> err")}
+  }
+  out(r.join("\n"));inv("report",{text:"selftest "+r.join(" | ")});
+};
+inv("report",{text:"page loaded"});
+</script></body></html>

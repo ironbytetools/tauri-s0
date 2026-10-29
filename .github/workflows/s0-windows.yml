@@ -1,0 +1,99 @@
+name: s0-windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  sqlcipher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain for vendored OpenSSL
+        run: |
+          choco install nasm -y --no-progress
+          "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Versions
+        run: |
+          perl -v | Select-String "This is"
+          nasm -v
+          rustc --version
+      - name: Run SQLCipher probe
+        working-directory: sqlcipher-probe
+        run: cargo run --release
+
+  app:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build NSIS installer
+        working-directory: app
+        run: |
+          npm install
+          npx tauri build --bundles nsis
+      - name: Silent install and update tests
+        run: |
+          $inst = Get-ChildItem app/src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          Write-Host "installer: $($inst.Name) $($inst.Length) bytes"
+          $dir = Join-Path $env:LOCALAPPDATA "tac-s0-probe"
+          $log = Join-Path $env:TEMP "s0-probe.log"
+          function Reset-State { Get-Process tac-s0-probe -ErrorAction SilentlyContinue | Stop-Process -Force; Remove-Item $log -ErrorAction SilentlyContinue }
+          function Show-State($label) {
+            Start-Sleep -Seconds 8
+            $running = [bool](Get-Process tac-s0-probe -ErrorAction SilentlyContinue)
+            Write-Host "[$label] installed=$(Test-Path (Join-Path $dir 'tac-s0-probe.exe')) running=$running"
+            if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host "    log: $_" } }
+          }
+          Reset-State
+          $p = Start-Process $inst.FullName -ArgumentList '/S' -Wait -PassThru
+          Write-Host "A: fresh '/S' exit=$($p.ExitCode)"
+          Show-State "A"
+          Reset-State
+          $p = Start-Process $inst.FullName -ArgumentList '/S','--updated','--force-run' -Wait -PassThru
+          Write-Host "B: Electron-style '/S --updated --force-run' exit=$($p.ExitCode)"
+          Show-State "B"
+          Reset-State
+          $p = Start-Process $inst.FullName -ArgumentList '/S','/UPDATE','/R' -Wait -PassThru
+          Write-Host "C: Tauri-style '/S /UPDATE /R' exit=$($p.ExitCode)"
+          Show-State "C"
+          Reset-State
+          $un = Join-Path $dir "uninstall.exe"
+          Write-Host "uninstaller present: $(Test-Path $un)"
+          if (Test-Path $un) {
+            $p = Start-Process $un -ArgumentList '/S' -Wait -PassThru
+            Start-Sleep -Seconds 5
+            Write-Host "D: uninstall exit=$($p.ExitCode) leftover=$(Test-Path (Join-Path $dir 'tac-s0-probe.exe'))"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tac-s0-probe-installer
+          path: app/src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 7
+
+  app-winlock:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build NSIS installer with the lock hook
+        working-directory: app
+        run: |
+          npm install
+          npx tauri build --bundles nsis --features winlock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tac-s0-probe-winlock-installer
+          path: app/src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 7
