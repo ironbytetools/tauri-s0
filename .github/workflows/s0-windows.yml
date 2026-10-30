@@ -30,6 +30,7 @@ jobs:
 
   app:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,6 +47,12 @@ jobs:
           Write-Host "installer: $($inst.Name) $($inst.Length) bytes"
           $dir = Join-Path $env:LOCALAPPDATA "tac-s0-probe"
           $log = Join-Path $env:TEMP "s0-probe.log"
+          function Run-Inst($argList) {
+            $p = Start-Process $inst.FullName -ArgumentList $argList -PassThru
+            $null = $p.Handle
+            if (-not $p.WaitForExit(180000)) { Write-Host "TIMEOUT: installer did not exit in 180 s"; $p.Kill(); return "timeout" }
+            return $p.ExitCode
+          }
           function Reset-State { Get-Process tac-s0-probe -ErrorAction SilentlyContinue | Stop-Process -Force; Remove-Item $log -ErrorAction SilentlyContinue }
           function Show-State($label) {
             Start-Sleep -Seconds 8
@@ -54,22 +61,24 @@ jobs:
             if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host "    log: $_" } }
           }
           Reset-State
-          $p = Start-Process $inst.FullName -ArgumentList '/S' -Wait -PassThru
-          Write-Host "A: fresh '/S' exit=$($p.ExitCode)"
+          $code = Run-Inst @('/S')
+          Write-Host "A: fresh '/S' exit=$code"
           Show-State "A"
           Reset-State
-          $p = Start-Process $inst.FullName -ArgumentList '/S','--updated','--force-run' -Wait -PassThru
-          Write-Host "B: Electron-style '/S --updated --force-run' exit=$($p.ExitCode)"
+          $code = Run-Inst @('/S','--updated','--force-run')
+          Write-Host "B: Electron-style '/S --updated --force-run' exit=$code"
           Show-State "B"
           Reset-State
-          $p = Start-Process $inst.FullName -ArgumentList '/S','/UPDATE','/R' -Wait -PassThru
-          Write-Host "C: Tauri-style '/S /UPDATE /R' exit=$($p.ExitCode)"
+          $code = Run-Inst @('/S','/UPDATE','/R')
+          Write-Host "C: Tauri-style '/S /UPDATE /R' exit=$code"
           Show-State "C"
           Reset-State
           $un = Join-Path $dir "uninstall.exe"
           Write-Host "uninstaller present: $(Test-Path $un)"
           if (Test-Path $un) {
-            $p = Start-Process $un -ArgumentList '/S' -Wait -PassThru
+            $p = Start-Process $un -ArgumentList '/S' -PassThru
+            $null = $p.Handle
+            if (-not $p.WaitForExit(120000)) { Write-Host "TIMEOUT: uninstaller"; $p.Kill() }
             Start-Sleep -Seconds 5
             Write-Host "D: uninstall exit=$($p.ExitCode) leftover=$(Test-Path (Join-Path $dir 'tac-s0-probe.exe'))"
           }
@@ -81,6 +90,7 @@ jobs:
 
   app-winlock:
     runs-on: windows-latest
+    timeout-minutes: 30
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
